@@ -1,11 +1,1 @@
-/* index.css */
-:root {
-  --primary-color: #4f46e5;
-  --font-sans: "Inter", sans-serif;
-}
 
-body {
-  font-family: var(--font-sans);
-  margin: 0;
-  background-color: #f9fafb;
-}

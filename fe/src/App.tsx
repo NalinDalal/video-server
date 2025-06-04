@@ -15,7 +15,10 @@ import {
   HardDrive,
 } from "lucide-react";
 
+// API Endpoint
 const API = "http://localhost:8000";
+
+// ----------------- Types ------------------
 
 interface VideoFile {
   filename: string;
@@ -31,6 +34,8 @@ interface UploadProgress {
   percentage: number;
 }
 
+// ------------- Utilities ------------------
+
 const formatDate = (date: string) =>
   new Date(date).toLocaleString("en-US", {
     year: "numeric",
@@ -45,10 +50,10 @@ const formatFileSize = (bytes: number) => {
   const k = 1024;
   const sizes = ["Bytes", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return (
-    Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
-  );
+  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
 };
+
+// -------------- Toast Component ----------------
 
 const Toast = ({
   message,
@@ -65,16 +70,13 @@ const Toast = ({
   }, [onClose]);
 
   return (
-    <div className="fixed top-6 right-6 z-50 duration-300 animate-in slide-in-from-right-full">
+    <div className="fixed top-6 right-6 z-50 animate-in slide-in-from-right-full">
       <div
-        className={`
-          px-6 py-4 flex items-center gap-3 rounded-xl shadow-lg backdrop-blur-sm border
-          ${
-            type === "success"
-              ? "bg-emerald-500/90 border-emerald-400 text-white"
-              : "bg-red-500/90 border-red-400 text-white"
-          }
-        `}
+        className={`px-6 py-4 flex items-center gap-3 rounded-xl shadow-lg backdrop-blur-sm border ${
+          type === "success"
+            ? "bg-emerald-500/90 border-emerald-400 text-white"
+            : "bg-red-500/90 border-red-400 text-white"
+        }`}
       >
         {type === "success" ? (
           <CheckCircle size={20} className="flex-shrink-0" />
@@ -86,6 +88,8 @@ const Toast = ({
     </div>
   );
 };
+
+// -------------- Video Card Component ----------------
 
 const VideoCard = ({
   video,
@@ -122,6 +126,7 @@ const VideoCard = ({
         >
           <source src={`${API}${video.url}`} type="video/mp4" />
         </video>
+
         {!isHovered && (
           <div className="flex absolute inset-0 justify-center items-center opacity-0 transition-opacity duration-300 group-hover:opacity-100 bg-black/20">
             <div className="p-3 rounded-full bg-white/90 backdrop-blur-sm">
@@ -172,6 +177,8 @@ const VideoCard = ({
   );
 };
 
+// -------------- UploadZone Component ----------------
+
 const UploadZone = ({
   onUpload,
   uploading,
@@ -196,11 +203,7 @@ const UploadZone = ({
     <div
       className={`
         relative border-2 border-dashed rounded-3xl p-12 text-center transition-all duration-300
-        ${
-          drag
-            ? "bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-400 scale-[1.02]"
-            : "border-gray-300 hover:border-gray-400 hover:bg-gray-50/50"
-        }
+        ${drag ? "bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-400 scale-[1.02]" : "border-gray-300 hover:border-gray-400 hover:bg-gray-50/50"}
         ${uploading ? "opacity-50 pointer-events-none" : ""}
       `}
       onDragOver={(e) => {
@@ -274,6 +277,8 @@ const UploadZone = ({
     </div>
   );
 };
+
+// -------------- App Component ----------------
 
 const App = () => {
   const [videos, setVideos] = useState<VideoFile[]>([]);

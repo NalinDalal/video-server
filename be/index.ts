@@ -1,34 +1,40 @@
-// server.ts
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serveStatic } from "hono/bun";
 import { mkdir, readdir, unlink, stat } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
+import mime from "mime-types";
 
 const app = new Hono();
 
 // Types
-interface VideoFile {
+interface UploadedFile {
   filename: string;
   originalName: string;
   size: number;
   uploadDate: Date;
   url: string;
+  mimeType: string | false;
 }
 
-interface UploadResponse {
+interface UploadResponse extends Omit<UploadedFile, "uploadDate"> {
   message: string;
-  filename: string;
-  originalName: string;
-  size: number;
-  url: string;
 }
 
 // Configuration
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
-const ALLOWED_EXTENSIONS = [".mp4"];
+const ALLOWED_EXTENSIONS = [
+  ".mp4",
+  ".webm",
+  ".ogg",
+  ".mov",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".pdf",
+]; // customizable
 
 // Ensure uploads directory exists
 async function ensureUploadsDir() {
@@ -38,31 +44,29 @@ async function ensureUploadsDir() {
   }
 }
 
-// Initialize uploads directory
 await ensureUploadsDir();
 
 // Middleware
 app.use(
   "*",
   cors({
-    origin: ["http://localhost:3000", "http://localhost:5173"], // React dev server ports
+    origin: ["http://localhost:3000", "http://localhost:5173"],
     credentials: true,
   }),
 );
 
-// Serve uploaded videos
-app.use("/videos/*", serveStatic({ root: "./" }));
+app.use("/files/*", serveStatic({ root: "./" }));
 
 // Health check
 app.get("/health", (c) => {
   return c.json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
-// Get all videos
-app.get("/api/videos", async (c) => {
+// Get all files
+app.get("/api/files", async (c) => {
   try {
     const files = await readdir(UPLOADS_DIR);
-    const videoFiles: VideoFile[] = [];
+    const uploadedFiles: UploadedFile[] = [];
 
     for (const file of files) {
       const ext = path.extname(file).toLowerCase();
@@ -70,61 +74,48 @@ app.get("/api/videos", async (c) => {
         const filePath = path.join(UPLOADS_DIR, file);
         const stats = await stat(filePath);
 
-        // Extract original name from timestamp-prefixed filename
-        const originalName = file.replace(/^\d+-/, "");
-
-        videoFiles.push({
+        uploadedFiles.push({
           filename: file,
-          originalName,
+          originalName: file.replace(/^\d+-/, ""),
           size: stats.size,
           uploadDate: stats.birthtime,
-          url: `/videos/uploads/${file}`,
+          url: `/files/uploads/${file}`,
+          mimeType: mime.lookup(ext),
         });
       }
     }
 
-    // Sort by upload date (newest first)
-    videoFiles.sort((a, b) => b.uploadDate.getTime() - a.uploadDate.getTime());
+    uploadedFiles.sort(
+      (a, b) => b.uploadDate.getTime() - a.uploadDate.getTime(),
+    );
 
-    return c.json(videoFiles);
+    return c.json(uploadedFiles);
   } catch (error) {
-    console.error("Error reading videos:", error);
-    return c.json({ error: "Failed to read videos" }, 500);
+    console.error("Error reading files:", error);
+    return c.json({ error: "Failed to read files" }, 500);
   }
 });
 
-// Upload video
+// Upload file
 app.post("/api/upload", async (c) => {
   try {
     const formData = await c.req.formData();
-    const file = formData.get("video") as File;
+    const file = formData.get("file") as File;
 
-    if (!file) {
-      return c.json({ error: "No file provided" }, 400);
-    }
-
-    // Validate file size
-    if (file.size > MAX_FILE_SIZE) {
+    if (!file) return c.json({ error: "No file provided" }, 400);
+    if (file.size > MAX_FILE_SIZE)
       return c.json(
-        {
-          error: `File too large. Maximum size is ${MAX_FILE_SIZE / 1024 / 1024}MB`,
-        },
+        { error: `File too large. Limit is ${MAX_FILE_SIZE / 1024 / 1024}MB` },
         400,
       );
-    }
 
-    // Validate file extension
     const ext = path.extname(file.name).toLowerCase();
-    if (!ALLOWED_EXTENSIONS.includes(ext)) {
-      return c.json({ error: "Only MP4 files are allowed" }, 400);
-    }
+    if (!ALLOWED_EXTENSIONS.includes(ext))
+      return c.json({ error: `Extension ${ext} not allowed` }, 400);
 
-    // Generate unique filename with timestamp
     const timestamp = Date.now();
     const filename = `${timestamp}-${file.name}`;
     const filePath = path.join(UPLOADS_DIR, filename);
-
-    // Save file
     const arrayBuffer = await file.arrayBuffer();
     await Bun.write(filePath, arrayBuffer);
 
@@ -133,7 +124,8 @@ app.post("/api/upload", async (c) => {
       filename,
       originalName: file.name,
       size: file.size,
-      url: `/videos/uploads/${filename}`,
+      url: `/files/uploads/${filename}`,
+      mimeType: mime.lookup(ext),
     };
 
     return c.json(response);
@@ -143,12 +135,11 @@ app.post("/api/upload", async (c) => {
   }
 });
 
-// Delete video
-app.delete("/api/videos/:filename", async (c) => {
+// Delete file
+app.delete("/api/files/:filename", async (c) => {
   try {
     const filename = c.req.param("filename");
 
-    // Security check - prevent path traversal
     if (
       filename.includes("..") ||
       filename.includes("/") ||
@@ -158,25 +149,21 @@ app.delete("/api/videos/:filename", async (c) => {
     }
 
     const filePath = path.join(UPLOADS_DIR, filename);
-
-    if (!existsSync(filePath)) {
-      return c.json({ error: "Video not found" }, 404);
-    }
+    if (!existsSync(filePath)) return c.json({ error: "File not found" }, 404);
 
     await unlink(filePath);
-    return c.json({ message: "Video deleted successfully" });
+    return c.json({ message: "File deleted successfully" });
   } catch (error) {
     console.error("Delete error:", error);
-    return c.json({ error: "Failed to delete video" }, 500);
+    return c.json({ error: "Failed to delete file" }, 500);
   }
 });
 
-// Stream video with range support
+// Stream file (if supported)
 app.get("/api/stream/:filename", async (c) => {
   try {
     const filename = c.req.param("filename");
 
-    // Security check
     if (
       filename.includes("..") ||
       filename.includes("/") ||
@@ -186,19 +173,18 @@ app.get("/api/stream/:filename", async (c) => {
     }
 
     const filePath = path.join(UPLOADS_DIR, filename);
-
-    if (!existsSync(filePath)) {
-      return c.json({ error: "Video not found" }, 404);
-    }
+    if (!existsSync(filePath)) return c.json({ error: "File not found" }, 404);
 
     const file = Bun.file(filePath);
     const fileSize = file.size;
+    const mimeType =
+      mime.lookup(path.extname(filename)) || "application/octet-stream";
     const range = c.req.header("range");
 
-    if (range) {
-      const parts = range.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    if (range && mimeType.startsWith("video/")) {
+      const [startStr, endStr] = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(startStr, 10);
+      const end = endStr ? parseInt(endStr, 10) : fileSize - 1;
       const chunkSize = end - start + 1;
 
       const stream = file.slice(start, end + 1).stream();
@@ -209,29 +195,25 @@ app.get("/api/stream/:filename", async (c) => {
           "Content-Range": `bytes ${start}-${end}/${fileSize}`,
           "Accept-Ranges": "bytes",
           "Content-Length": chunkSize.toString(),
-          "Content-Type": "video/mp4",
-        },
-      });
-    } else {
-      return new Response(file.stream(), {
-        headers: {
-          "Content-Length": fileSize.toString(),
-          "Content-Type": "video/mp4",
+          "Content-Type": mimeType,
         },
       });
     }
+
+    return new Response(file.stream(), {
+      headers: {
+        "Content-Length": fileSize.toString(),
+        "Content-Type": mimeType,
+      },
+    });
   } catch (error) {
     console.error("Stream error:", error);
-    return c.json({ error: "Failed to stream video" }, 500);
+    return c.json({ error: "Failed to stream file" }, 500);
   }
 });
 
-// 404 handler
-app.notFound((c) => {
-  return c.json({ error: "Not found" }, 404);
-});
-
-// Error handler
+// 404 & error handler
+app.notFound((c) => c.json({ error: "Not found" }, 404));
 app.onError((err, c) => {
   console.error("Server error:", err);
   return c.json({ error: "Internal server error" }, 500);
@@ -239,14 +221,14 @@ app.onError((err, c) => {
 
 const port = process.env.PORT || 8000;
 
-console.log(`🚀 MP4 Server starting on http://localhost:${port}`);
+console.log(`🚀 Server running at http://localhost:${port}`);
 console.log("📁 Upload directory:", UPLOADS_DIR);
-console.log("📊 Max file size:", MAX_FILE_SIZE / 1024 / 1024, "MB");
-console.log("🎬 Allowed formats:", ALLOWED_EXTENSIONS.join(", "));
+console.log("📦 Max upload size:", MAX_FILE_SIZE / 1024 / 1024, "MB");
+console.log("🎉 Allowed extensions:", ALLOWED_EXTENSIONS.join(", "));
 
 export default {
   port,
   fetch: app.fetch,
 };
-console.log("Hello via Bun!");
 
+console.log("Hello via Bun!");
